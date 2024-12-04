@@ -2,11 +2,7 @@ pipeline {
     agent any
 
     parameters {
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['dev', 'prod'],
-            description: 'Target environment for deployment'
-        )
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Target environment')
     }
 
     environment {
@@ -17,97 +13,41 @@ pipeline {
 
     stages {
         stage('Checkout') {
-            steps {
-                checkout scm
-            }
+            steps { checkout scm }
         }
 
-        stage('Initialize Terraform') {
+        stage('Terraform') {
             steps {
                 script {
                     dir(TERRAFORM_DIR) {
-                        // Initialize Terraform backend and providers
-                        sh '''
-                            terraform init \
-                                -input=false \
-                                -backend=true
-                        '''
+                        // Init and workspace
+                        sh "terraform init -input=false -backend=true"
+                        sh "terraform workspace select ${params.ENVIRONMENT} || terraform workspace new ${params.ENVIRONMENT}"
 
-                        // Configure workspace
-                        def workspace = params.ENVIRONMENT
-                        sh """
-                            terraform workspace select ${workspace} || \
-                            terraform workspace new ${workspace}
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Terraform Plan') {
-            steps {
-                script {
-                    dir(TERRAFORM_DIR) {
+                        // Plan and apply
                         def varFile = "${VAR_FILES_DIR}/${params.ENVIRONMENT}.tfvars"
-
-                        // Generate and save plan
-                        sh """
-                            terraform plan \
-                                -input=false \
-                                -var-file=${varFile} \
-                                -out=tfplan
-                        """
+                        sh "terraform plan -input=false -var-file=${varFile} -out=tfplan"
+                        sh "terraform apply -input=false -auto-approve tfplan"
                     }
                 }
             }
         }
 
-        stage('Terraform Apply') {
+        stage('Validate') {
+            when { expression { params.ENVIRONMENT == 'prod' } }
             steps {
-                script {
-                    dir(TERRAFORM_DIR) {
-                        // Apply saved plan
-                        sh 'terraform apply -input=false -auto-approve tfplan'
-                    }
-                }
-            }
-        }
-
-        stage('Post-Deployment Validation') {
-            when {
-                expression { params.ENVIRONMENT == 'prod' }
-            }
-            steps {
-                script {
-                    // Health checks and validation
-                    sh '''
-                        echo "Validating deployment..."
-                        # Add validation commands here
-                    '''
-                }
+                sh 'echo "Validating deployment..."'
             }
         }
     }
 
     post {
-        always {
-            cleanWs()
-        }
-
+        always { cleanWs() }
         success {
-            script {
-                def message = "Deployment to ${params.ENVIRONMENT} completed successfully"
-                echo message
-                // Add notification integration here
-            }
+            echo "Deployment to ${params.ENVIRONMENT} completed successfully"
         }
-
         failure {
-            script {
-                def message = "Deployment to ${params.ENVIRONMENT} failed"
-                echo message
-                // Add failure notification and rollback procedures here
-            }
+            echo "Deployment to ${params.ENVIRONMENT} failed"
         }
     }
 }
