@@ -1,14 +1,18 @@
 pipeline {
     agent any
-    
+
     parameters {
-        // Choice parameter for selecting environment
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Choose the environment for deployment')
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'prod'],
+            description: 'Target environment for deployment'
+        )
     }
 
     environment {
-        // AWS credentials (if needed)
         AWS_CREDENTIALS = credentials('cred')
+        TERRAFORM_DIR = '.'
+        VAR_FILES_DIR = './env-files'
     }
 
     stages {
@@ -17,21 +21,42 @@ pipeline {
                 checkout scm
             }
         }
-        
+
         stage('Initialize Terraform') {
             steps {
                 script {
-                    // Initialize Terraform and set the workspace based on the selected environment
-                    def environment = params.ENVIRONMENT
-                    
-                    // Initialize Terraform only once
-                    sh 'terraform init'
+                    dir(TERRAFORM_DIR) {
+                        // Initialize Terraform backend and providers
+                        sh '''
+                            terraform init \
+                                -input=false \
+                                -backend=true
+                        '''
 
-                    // Set Terraform workspace dynamically
-                    if (environment == 'dev') {
-                        sh 'terraform workspace select dev || terraform workspace new dev'
-                    } else if (environment == 'prod') {
-                        sh 'terraform workspace select prod || terraform workspace new prod'
+                        // Configure workspace
+                        def workspace = params.ENVIRONMENT
+                        sh """
+                            terraform workspace select ${workspace} || \
+                            terraform workspace new ${workspace}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                script {
+                    dir(TERRAFORM_DIR) {
+                        def varFile = "${VAR_FILES_DIR}/${params.ENVIRONMENT}.tfvars"
+
+                        // Generate and save plan
+                        sh """
+                            terraform plan \
+                                -input=false \
+                                -var-file=${varFile} \
+                                -out=tfplan
+                        """
                     }
                 }
             }
@@ -40,41 +65,49 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 script {
-                    // Apply Terraform changes based on the selected environment
-                    def environment = params.ENVIRONMENT
-                    def varFile = environment == 'dev' ? './env-files/dev.tfvars' : './env-files/prod.tfvars'
-                    sh "terraform apply --auto-approve -var-file=${varFile}"
+                    dir(TERRAFORM_DIR) {
+                        // Apply saved plan
+                        sh 'terraform apply -input=false -auto-approve tfplan'
+                    }
                 }
             }
         }
 
-        stage('Post-Deployment') {
+        stage('Post-Deployment Validation') {
             when {
-                expression {
-                    // Only run post-deployment tasks for 'prod'
-                    return params.ENVIRONMENT == 'prod'
-                }
+                expression { params.ENVIRONMENT == 'prod' }
             }
             steps {
-                echo "Running post-deployment tasks for production environment."
-                // Add further steps like notifying teams or triggering additional processes
+                script {
+                    // Health checks and validation
+                    sh '''
+                        echo "Validating deployment..."
+                        # Add validation commands here
+                    '''
+                }
             }
         }
     }
 
     post {
         always {
-            // Always perform cleanup or notifications, if needed
-            echo "Cleaning up or finalizing the process."
+            cleanWs()
         }
-        
+
         success {
-            echo "Deployment succeeded for environment: ${params.ENVIRONMENT}"
+            script {
+                def message = "Deployment to ${params.ENVIRONMENT} completed successfully"
+                echo message
+                // Add notification integration here
+            }
         }
-        
+
         failure {
-            echo "Deployment failed for environment: ${params.ENVIRONMENT}"
-            // You could notify the team or roll back changes, depending on your needs
+            script {
+                def message = "Deployment to ${params.ENVIRONMENT} failed"
+                echo message
+                // Add failure notification and rollback procedures here
+            }
         }
     }
 }
