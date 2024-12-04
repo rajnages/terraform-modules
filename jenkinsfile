@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         // AWS credentials (if needed)
-        AWS_CREDENTIALS = credentials('creds')
+        AWS_CREDENTIALS = credentials('cred')
     }
 
     stages {
