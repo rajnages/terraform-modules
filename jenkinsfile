@@ -1,0 +1,55 @@
+pipeline {
+    agent any
+    
+    parameters {
+        // Choice parameter for selecting environment
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Choose the environment for deployment')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Initialize Terraform') {
+            steps {
+                script {
+                    // Initialize Terraform and set the workspace based on the selected environment
+                    def environment = params.ENVIRONMENT
+                    sh 'terraform init'
+
+                    if (environment == 'dev') {
+                        sh 'terraform workspace new dev || terraform workspace select dev'
+                    } else if (environment == 'prod') {
+                        sh 'terraform workspace new prod || terraform workspace select prod'
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                script {
+                    // Apply Terraform changes based on the selected environment
+                    def environment = params.ENVIRONMENT
+                    def varFile = environment == 'dev' ? './env-file/dev.tfvars' : './env-file/prod.tfvars'
+                    sh "terraform apply --auto-approve -var-file=${varFile}"
+                }
+            }
+        }
+
+        stage('Post-Deployment') {
+            when {
+                expression {
+                    // Add conditions to run post-deployment tasks only for 'prod' (if needed)
+                    return params.ENVIRONMENT == 'prod'
+                }
+            }
+            steps {
+                echo "Post-deployment tasks for production environment."
+                // Add further steps such as notifying teams or other processes for prod environment
+            }
+        }
+    }
+}
