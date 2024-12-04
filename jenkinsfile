@@ -42,7 +42,7 @@ pipeline {
                 script {
                     // Apply Terraform changes based on the selected environment
                     def environment = params.ENVIRONMENT
-                    def varFile = environment == 'dev' ? './env-file/dev.tfvars' : './env-file/prod.tfvars'
+                    def varFile = environment == 'dev' ? './env-files/dev.tfvars' : './env-files/prod.tfvars'
                     sh "terraform apply --auto-approve -var-file=${varFile}"
                 }
             }
