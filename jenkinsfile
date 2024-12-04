@@ -6,23 +6,32 @@ pipeline {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Choose the environment for deployment')
     }
 
+    environment {
+        // AWS credentials (if needed)
+        AWS_CREDENTIALS = credentials('creds')
+    }
+
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
+        
         stage('Initialize Terraform') {
             steps {
                 script {
                     // Initialize Terraform and set the workspace based on the selected environment
                     def environment = params.ENVIRONMENT
+                    
+                    // Initialize Terraform only once
                     sh 'terraform init'
 
+                    // Set Terraform workspace dynamically
                     if (environment == 'dev') {
-                        sh 'terraform workspace new dev || terraform workspace select dev'
+                        sh 'terraform workspace select dev || terraform workspace new dev'
                     } else if (environment == 'prod') {
-                        sh 'terraform workspace new prod || terraform workspace select prod'
+                        sh 'terraform workspace select prod || terraform workspace new prod'
                     }
                 }
             }
@@ -42,14 +51,30 @@ pipeline {
         stage('Post-Deployment') {
             when {
                 expression {
-                    // Add conditions to run post-deployment tasks only for 'prod' (if needed)
+                    // Only run post-deployment tasks for 'prod'
                     return params.ENVIRONMENT == 'prod'
                 }
             }
             steps {
-                echo "Post-deployment tasks for production environment."
-                // Add further steps such as notifying teams or other processes for prod environment
+                echo "Running post-deployment tasks for production environment."
+                // Add further steps like notifying teams or triggering additional processes
             }
+        }
+    }
+
+    post {
+        always {
+            // Always perform cleanup or notifications, if needed
+            echo "Cleaning up or finalizing the process."
+        }
+        
+        success {
+            echo "Deployment succeeded for environment: ${params.ENVIRONMENT}"
+        }
+        
+        failure {
+            echo "Deployment failed for environment: ${params.ENVIRONMENT}"
+            // You could notify the team or roll back changes, depending on your needs
         }
     }
 }
