@@ -1,53 +1,71 @@
+properties([
+    parameters([
+        choice(
+            choices: ['dev','prod'],
+            name: 'Environment'
+        ),
+        choice(
+            choices: ['plan', 'apply', 'destroy'],
+            name: 'Terraform_Action'
+        )
+    ])
+])
 pipeline {
     agent any
-
-    parameters {
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Target environment')
-    }
-
-    environment {
-        AWS_CREDENTIALS = credentials('cred')
-        TERRAFORM_DIR = '.'
-        VAR_FILES_DIR = './env-files'
-    }
-
     stages {
-        stage('Checkout') {
-            steps { checkout scm }
-        }
-
-        stage('Terraform') {
+        stage('Preparing') {
             steps {
-                script {
-                    dir(TERRAFORM_DIR) {
-                        // Init and workspace
-                        sh "terraform init -input=false -backend=true"
-                        sh "terraform workspace select ${params.ENVIRONMENT} || terraform workspace new ${params.ENVIRONMENT}"
-
-                        // Plan and apply
-                        def varFile = "${VAR_FILES_DIR}/${params.ENVIRONMENT}.tfvars"
-                        sh "terraform plan -input=false -var-file=${varFile} -out=tfplan"
-                        sh "terraform apply -input=false -auto-approve tfplan"
+                sh 'echo Preparing'
+            }
+        }
+        stage('Git Pulling') {
+            steps {
+                git branch: 'main', url: 'https://github.com/rajnages/terraform-modules.git'
+            }
+        }
+        stage('Init') {
+            steps {
+                withAWS(credentials: 'cred', region: 'us-east-1') {
+                    sh 'terraform init'
+                }
+            }
+        }
+        stage('Create and Select Workspace') {
+            steps {
+                withAWS(credentials: 'cred', region: 'us-east-1') {
+                    script {
+                        def workspace = params.Environment
+                        // Check if the workspace exists, create if not, then select it
+                        sh """
+                            terraform workspace new ${workspace} || terraform workspace select ${workspace}
+                        """
                     }
                 }
             }
         }
-
         stage('Validate') {
-            when { expression { params.ENVIRONMENT == 'prod' } }
             steps {
-                sh 'echo "Validating deployment..."'
+                withAWS(credentials: 'cred', region: 'us-east-1') {
+                    sh 'terraform validate'
+                }
             }
         }
-    }
-
-    post {
-        always { cleanWs() }
-        success {
-            echo "Deployment to ${params.ENVIRONMENT} completed successfully"
-        }
-        failure {
-            echo "Deployment to ${params.ENVIRONMENT} failed"
+        stage('Action') {
+            steps {
+                withAWS(credentials: 'cred', region: 'us-east-1') {
+                    script {
+                        if (params.Terraform_Action == 'plan') {
+                            sh "terraform plan -var-file=env-files/${params.Environment}.tfvars"
+                        } else if (params.Terraform_Action == 'apply') {
+                            sh "terraform apply -var-file=env-files/${params.Environment}.tfvars -auto-approve"
+                        } else if (params.Terraform_Action == 'destroy') {
+                            sh "terraform destroy -var-file=env-files/${params.Environment}.tfvars -auto-approve"
+                        } else {
+                            error "Invalid value for Terraform_Action: ${params.Environment}"
+                        }
+                    }
+                }
+            }
         }
     }
 }
